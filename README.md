@@ -2,7 +2,7 @@
 
 **Turn [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) into something you can carry in your pocket** — a WeChat bot that talks to your DSH from anywhere, plus a plugin that reshapes the DSH web UI into a phone-shaped app.
 
-[中文说明](README.zh-CN.md) · [Setup guide](docs/SETUP.md) · [Pitfalls](docs/PITFALLS.md) · [**Usage boundary**](docs/USAGE-BOUNDARY.md)
+[中文说明](README.zh-CN.md) · [Setup guide](docs/SETUP.md) · [**Phone app**](docs/MOBILE-APP.md) · [Pitfalls](docs/PITFALLS.md) · [**Usage boundary**](docs/USAGE-BOUNDARY.md)
 
 > ⚠️ **Personal use only.** This is a single-owner tool: one person, one bot, one conversation. It is **not** authorised for public services, group messaging, marketing, harassment, privacy invasion, circumventing platform rules, or operating someone else's account — see [docs/USAGE-BOUNDARY.md](docs/USAGE-BOUNDARY.md). You are solely responsible for how you deploy it.
 
@@ -37,6 +37,9 @@ The shipped web surface is a three-column desktop layout; on a phone the compose
 | Settings crushes labels vertically | Full-screen single column, nav becomes a horizontal strip |
 | Right sidebar opens with no way back | A visible "← back to chat" button |
 | iOS zooms the page on focus | 16px inputs |
+| No home-screen app | PWA manifest + PNG icons → **installs as an app** (own icon, full screen, no browser UI) |
+
+> 📱 **It also becomes a real phone app** — no APK, no app store: Chrome → "Add to Home screen" gives you a full-screen app icon, and the manifest's `start_url` can point at a short login link so it re-authenticates itself. See [docs/MOBILE-APP.md](docs/MOBILE-APP.md).
 
 ## Repository layout
 
@@ -48,9 +51,12 @@ deploy/
   systemd/              boot start, crash restart, watchdog, session filing, journald caps
   scripts/              watchdog + workspace-filing scripts
   nginx/                reverse proxy + mTLS device-level access example
+  pwa/                  manifest example + icon renderer (home-screen app)
 docs/
   SETUP.md              zero-to-running deployment guide
+  MOBILE-APP.md         installing the web UI as a phone app (PWA)
   PITFALLS.md           18 hard-won lessons about DSH internals and the WeChat gateway
+  USAGE-BOUNDARY.md     personal-use-only terms
 ```
 
 ## Quick start

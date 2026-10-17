@@ -2,7 +2,7 @@
 
 **把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）变成随身可用的东西** —— 一个能在微信里随时对话的机器人，加上一个把 DSH 网页界面重排成手机 App 的插件。
 
-[English](README.md) · [部署指南](docs/SETUP.md) · [踩坑记录](docs/PITFALLS.md) · [**使用边界**](docs/USAGE-BOUNDARY.md)
+[English](README.md) · [部署指南](docs/SETUP.md) · [**装成手机 App**](docs/MOBILE-APP.md) · [踩坑记录](docs/PITFALLS.md) · [**使用边界**](docs/USAGE-BOUNDARY.md)
 
 > ⚠️ **仅限个人自用**。这是一个"一个人 + 一个机器人 + 一段对话"的单人工具，**不授权**用于对外提供服务、群发营销、骚扰他人、窥探隐私、绕过平台规则或替他人托管账号——详见 [使用边界](docs/USAGE-BOUNDARY.md)。一切后果由使用者自负。
 
@@ -37,6 +37,11 @@ DSH 自带的是三栏桌面布局：手机上输入框被键盘遮住、侧栏�
 | 设置页文字竖排 | 全屏单列，导航变成顶部横向条 |
 | 右侧栏打开后没有返回入口 | 常驻「← 返回对话」按钮 |
 | iOS 聚焦时整页放大 | 输入框强制 16px |
+| 没有主屏图标 | PWA 清单 + PNG 图标 → **可装成 App**（独立图标、全屏、无地址栏） |
+
+> 📱 **还能变成真正的手机 App** —— 不用写 APK、不用上架：Chrome 里「添加到主屏幕」即可，
+> 独立图标 + 全屏运行；清单的 `start_url` 指向登录短链后，App 每次启动都会自动登录。
+> 详见 [docs/MOBILE-APP.md](docs/MOBILE-APP.md)。
 
 ## 目录结构
 
@@ -48,9 +53,12 @@ deploy/
   systemd/              开机自启、崩溃重启、看门狗、会话归类、journald 上限
   scripts/              看门狗与会话归类脚本
   nginx/                反向代理 + mTLS 设备级访问控制示例
+  pwa/                  手机 App 清单示例 + 图标渲染脚本
 docs/
   SETUP.md              从零部署全流程
+  MOBILE-APP.md         把网页界面装成手机 App（PWA）
   PITFALLS.md           18 条踩坑记录（DSH 内部机制 + 微信网关）
+  USAGE-BOUNDARY.md     仅限个人自用的使用边界
 ```
 
 ## 快速开始

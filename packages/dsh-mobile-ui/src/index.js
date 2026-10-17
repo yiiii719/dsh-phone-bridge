@@ -605,11 +605,31 @@ const VIEWPORT_SCRIPT = String.raw`
 })();
 `;
 
+/**
+ * PWA hooks: with these the site installs to the home screen as a real app —
+ * its own icon, no browser chrome. Rows injected at the head come before DSH's
+ * own <link rel="manifest">, and the first manifest in document order wins, so
+ * this one (PNG icons + standalone display) is the one the browser reads.
+ * The files live outside the DSH install, so upgrades cannot wipe them.
+ */
+const PWA_HEAD_HTML = [
+  '<link rel="manifest" href="/dsh-app/manifest.webmanifest">',
+  '<meta name="theme-color" content="#0b0b0c">',
+  '<meta name="mobile-web-app-capable" content="yes">',
+  '<meta name="apple-mobile-web-app-capable" content="yes">',
+  '<meta name="apple-mobile-web-app-status-bar-style" content="default">',
+  '<meta name="apple-mobile-web-app-title" content="DSH">',
+  '<link rel="apple-touch-icon" href="/dsh-app/apple-touch-icon.png">',
+].join("");
+
 export function apply(ctx, config = {}) {
   if (config.enabled === false) return;
   ctx.on("webserver/index-inject", (table) => {
     table.push({ kind: "style", text: MOBILE_CSS });
     table.push({ kind: "script", placement: "head", text: VIEWPORT_SCRIPT });
+    if (config.pwa !== false) {
+      table.push({ kind: "html", placement: "head", html: PWA_HEAD_HTML });
+    }
     if (config.tabBar !== false) {
       table.push({ kind: "script", placement: "head", text: TABBAR_SCRIPT });
     }
