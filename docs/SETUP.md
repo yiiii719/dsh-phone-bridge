@@ -58,18 +58,16 @@ DSH 的每个 profile 是一个插件栈。profile 目录：`$DSH_HOME/profiles/
   config:
     enabled: true
     sessionProfile: headless          # 每轮任务用哪个 profile 跑
-    workDir: /root/dsh-convos/wechat  # 每个联系人一个子目录
+    workDir: /root/dsh-convos/wechat  # 单一工作目录（不按联系人人分子目录）
     dshHostExe: /opt/node24/bin/node
     dshCliPath: /opt/node24/lib/node_modules/@deepseek-ai/dsh/lib/bin.js
-    allowFrom: "wxid_your_peer@im.wechat"   # 空或 "*" = 所有人
-    perPeerDirs: true
+    allowFrom: "wxid_your_peer@im.wechat"   # 只放行你自己；留空或 "*" 等于对所有人开放
     logLevel: info
 
-    # 每天定时早报（可选）
+    # 每天定时早报（可选）；推送对象就是上面 allowFrom 里的主人
     schedule:
       enabled: true
       time: "06:00"
-      peers: ["wxid_your_peer@im.wechat"]
       runOnStart: false               # true 则启动时先跑一次，便于验证
       prompt: |
         [定时任务·每日早报] 现在是早上六点，给我准备《昨日要闻早报》。要求：

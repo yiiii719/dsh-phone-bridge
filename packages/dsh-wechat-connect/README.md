@@ -11,8 +11,11 @@ DeepSeek Harness 插件。用微信扫码登录一个机器人，之后**在微�
                         发送回复             长轮询拉取
                             │                    ▼
                      dsh-wechat-connect ──► dsh --profile headless
-                      (本插件)                (每个联系人一条独立会话)
+                      (本插件)                (一条持久会话，单一工作目录)
 ```
+
+> ⚠️ **仅限个人自用**：一个主人、一个机器人、一段对话。请把 `allowFrom` 设成你自己的微信 id；
+> 不要用于对外服务、群发营销、骚扰或窥探他人。详见仓库根目录的 `docs/USAGE-BOUNDARY.md`。
 
 ## 工作原理
 
@@ -23,8 +26,8 @@ DeepSeek Harness 插件。用微信扫码登录一个机器人，之后**在微�
    `dsh --profile <sessionProfile> headless --json` 拿回答复文本。
 4. 答复按 3800 字符切块发回去，并附一行 `DSH · 上下文占用 / 工作目录` 的署名。
 
-**每个微信联系人绑定一条独立的、持久化的 DSH 会话**：下次同一个人再来消息时会用
-`--session-id` 续上原来的上下文，彼此互不干扰，也不会打断你自己正在用的会话。
+**整段对话绑定一条持久化的 DSH 会话**，工作目录也只有一个（`workDir`）：下次再发消息会用
+`--session-id` 续上原来的上下文，不会打断你自己正在用的那些会话。
 
 ## 安装
 
@@ -83,9 +86,10 @@ dsh --profile wechat
 | 工具 | 作用 |
 | --- | --- |
 | `wechat_connect_login` | 获取登录二维码（终端里直接画出来），扫码后自动保存并启动 |
-| `wechat_connect_status` | 查看运行状态、登录账号、工作目录、白名单、各联系人绑定的会话 |
-| `wechat_connect_peers` | 列出给机器人发过消息的联系人及其会话 |
-| `wechat_connect_send` | 主动给某个联系人推送消息 |
+| `wechat_connect_status` | 查看运行状态、登录账号、工作目录、白名单、绑定的会话 |
+| `wechat_connect_owner` | 查看当前绑定的联系人、DSH 会话、能否主动推送 |
+| `wechat_connect_send` | 主动给主人推送一条消息 |
+| `wechat_connect_digest` | 立刻跑一次定时早报（不用等到点） |
 | `wechat_connect_control` | 不重启 DSH 的情况下 `start` / `stop` 桥接 |
 
 典型流程：
@@ -115,9 +119,10 @@ DSH：扫码成功，已登录账号 xxx，微信连接已启动
 | --- | --- | --- |
 | `enabled` | `true` | profile 启动时是否立刻开始长轮询 |
 | `baseUrl` | `https://ilinkai.weixin.qq.com` | 网关地址 |
-| `allowFrom` | 空 | 白名单。空或 `*` = 所有人都能用；否则逗号分隔的精确匹配列表 |
+| `allowFrom` | 空 | 白名单。**请设成你自己的微信 id**；空或 `*` = 里所有人都能用（仅限自用的项目不该这样配） |
 | `sessionProfile` | `headless` | 用哪个 profile 回答微信消息 |
-| `workDir` | 当前目录 | 会话的工作目录 |
+| `workDir` | 当前目录 | **单一**工作目录（不再按联系人人分子目录） |
+| `instructions` | 空 | 追加在每条任务前的人设/边界说明（可选） |
 | `routeTag` | 空 | 可选路由标签，非空时带 `skroutetag` 请求头 |
 | `longPollTimeoutMs` | `35000` | 长轮询窗口，自动夹在 1–60 秒 |
 | `maxReplyChars` | `3800` | 单条回复最大字符数，超出切块 |
@@ -141,12 +146,15 @@ DSH：扫码成功，已登录账号 xxx，微信连接已启动
 node test/bridge-live.test.js "D:\...\DeepSeek Harness.exe"   # 真实 DSH 回合联调
 ```
 
-会真跑三轮 DSH：首轮建会话、次轮续会话验证上下文、第三轮验证新联系人会话隔离，
+会真跑三轮 DSH：首轮建会话、次轮续会话验证上下文、第三轮验证会话失效后能自动新建，
 并检查用量统计与署名格式。全部通过才算成功。
 
 ## 已知边界
 
-- **只能被动回复**：网关要求回复必须携带该会话的 `context_token`，所以必须**先让对方
+- **单人自用**：一个主人、一个机器人、一条会话。请把 `allowFrom` 设成你自己的微信 id，
+  并把 `workDir` 指向一个你愿意让机器人读写的目录——**能给它发消息的人就能在你机器上
+  驱动 DSH 执行任务**（跑命令、改文件）。详见仓库根目录 `docs/USAGE-BOUNDARY.md`。
+- **只能被动回复**：网关要求回复必须携带该会话的 `context_token`，所以必须**先给对方
   给机器人发一条消息**，之后才能用 `wechat_connect_send` 主动推送。
 - **图片与文件会被下载**：网关把媒体下发为微信 CDN 链接 + AES 密钥，插件用
   AES-128-ECB 解开后落到 `incomingDir`，再把绝对路径写进这一轮的任务文本——

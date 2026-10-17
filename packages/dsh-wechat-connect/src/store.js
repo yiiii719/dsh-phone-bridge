@@ -1,22 +1,42 @@
 "use strict";
 /**
- * Durable bridge state: the long-poll cursor, per-peer Codex thread ids, the
- * last context token per peer, and a bounded set of already-answered messages.
+ * Durable bridge state for a single-owner setup: the long-poll cursor, the one
+ * DSH session the owner's chat continues, the owner's last context token, and a
+ * bounded set of already-answered messages.
+ *
+ * Earlier versions kept a map per WeChat peer (one contact, one directory, one
+ * session). That machinery is gone: this bridge is for talking to your own bot,
+ * so there is exactly one conversation. Old state files are migrated by taking
+ * the entry that matches the recorded owner (or the first one).
  */
 import { readJson, writeJson } from "./config.js";
 
 // Keep the dedup set bounded; the gateway only replays recent history.
 const MAX_PROCESSED = 500;
-const MAX_CONTEXT_TOKENS = 200;
 
 function emptyState() {
   return {
     cursor: "",
-    threadIds: {},
-    contextTokens: {},
+    sessionId: "",
+    contextToken: "",
+    owner: "",
     processed: [],
-    stats: { processedMessages: 0, lastPeerId: "", lastMessageAtMs: 0 },
+    stats: { processedMessages: 0, lastMessageAtMs: 0 },
   };
+}
+
+/** Pick the single value out of a legacy per-peer map. */
+function legacyPick(map, preferredKey) {
+  if (!map || typeof map !== "object") return "";
+  if (preferredKey && map[preferredKey]) return map[preferredKey];
+  const first = Object.values(map).find((value) => typeof value === "string" && value.trim());
+  return first ?? "";
+}
+
+function legacyOwner(map, preferredKey) {
+  if (!map || typeof map !== "object") return "";
+  if (preferredKey && map[preferredKey]) return preferredKey;
+  return Object.keys(map)[0] ?? "";
 }
 
 class ConnectState {
@@ -24,14 +44,21 @@ class ConnectState {
     this.file = file;
     const raw = readJson(file, null);
     const base = emptyState();
+    const legacyOwnerId = raw?.stats?.lastPeerId || "";
+
     this.data = {
       ...base,
       ...(raw ?? {}),
-      threadIds: { ...(raw?.threadIds ?? {}) },
-      contextTokens: { ...(raw?.contextTokens ?? {}) },
+      // Migrate the old per-peer maps down to single values.
+      sessionId: raw?.sessionId || legacyPick(raw?.threadIds, legacyOwnerId) || "",
+      contextToken: raw?.contextToken || legacyPick(raw?.contextTokens, legacyOwnerId) || "",
+      owner: raw?.owner || legacyOwner(raw?.contextTokens, legacyOwnerId) || legacyOwnerId || "",
       processed: Array.isArray(raw?.processed) ? raw.processed : [],
       stats: { ...base.stats, ...(raw?.stats ?? {}) },
     };
+    // Drop the legacy maps so a saved file is already in the new shape.
+    delete this.data.threadIds;
+    delete this.data.contextTokens;
     this.processedSet = new Set(this.data.processed);
   }
 
@@ -43,36 +70,38 @@ class ConnectState {
     this.data.cursor = String(value ?? "");
   }
 
+  get owner() {
+    return this.data.owner;
+  }
+
+  set owner(value) {
+    const text = String(value ?? "").trim();
+    if (text) this.data.owner = text;
+  }
+
+  get sessionId() {
+    return this.data.sessionId;
+  }
+
+  set sessionId(value) {
+    this.data.sessionId = String(value ?? "");
+  }
+
+  clearSession() {
+    this.data.sessionId = "";
+  }
+
+  get contextToken() {
+    return this.data.contextToken;
+  }
+
+  set contextToken(value) {
+    const text = String(value ?? "").trim();
+    if (text) this.data.contextToken = text;
+  }
+
   get stats() {
     return this.data.stats;
-  }
-
-  threadIdFor(peer) {
-    return this.data.threadIds[peer];
-  }
-
-  setThreadId(peer, threadId) {
-    this.data.threadIds[peer] = threadId;
-  }
-
-  clearThreadId(peer) {
-    delete this.data.threadIds[peer];
-  }
-
-  contextTokenFor(peer) {
-    return this.data.contextTokens[peer];
-  }
-
-  setContextToken(peer, token) {
-    const value = String(token ?? "").trim();
-    if (!value) return;
-    this.data.contextTokens[peer] = value;
-    const keys = Object.keys(this.data.contextTokens);
-    if (keys.length > MAX_CONTEXT_TOKENS) {
-      for (const key of keys.slice(0, keys.length - MAX_CONTEXT_TOKENS)) {
-        delete this.data.contextTokens[key];
-      }
-    }
   }
 
   isProcessed(key) {
@@ -89,9 +118,8 @@ class ConnectState {
     }
   }
 
-  noteHandled(peer) {
+  noteHandled() {
     this.data.stats.processedMessages += 1;
-    this.data.stats.lastPeerId = peer;
     this.data.stats.lastMessageAtMs = Date.now();
   }
 

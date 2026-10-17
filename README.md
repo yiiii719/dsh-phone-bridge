@@ -2,7 +2,9 @@
 
 **Turn [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) into something you can carry in your pocket** — a WeChat bot that talks to your DSH from anywhere, plus a plugin that reshapes the DSH web UI into a phone-shaped app.
 
-[中文说明](README.zh-CN.md) · [Setup guide](docs/SETUP.md) · [Pitfalls](docs/PITFALLS.md)
+[中文说明](README.zh-CN.md) · [Setup guide](docs/SETUP.md) · [Pitfalls](docs/PITFALLS.md) · [**Usage boundary**](docs/USAGE-BOUNDARY.md)
+
+> ⚠️ **Personal use only.** This is a single-owner tool: one person, one bot, one conversation. It is **not** authorised for public services, group messaging, marketing, harassment, privacy invasion, circumventing platform rules, or operating someone else's account — see [docs/USAGE-BOUNDARY.md](docs/USAGE-BOUNDARY.md). You are solely responsible for how you deploy it.
 
 <p align="center">
   <img src="docs/images/wechat-digest.jpg" width="45%" alt="WeChat bot delivering a daily briefing">
@@ -16,7 +18,7 @@ Two independent DSH plugins — use either one on its own.
 
 ### 1. `dsh-wechat-connect` — WeChat bridge
 
-Runs on your server and long-polls the WeChat iLink bot gateway. Text, images, voice and files go both ways; every contact gets their own working directory and their own DSH session, so conversations never bleed into each other.
+Runs on your server and long-polls the WeChat iLink bot gateway. Text, images, voice and files go both ways, in **one single conversation** with **one single working directory** — the bot serves its owner and nobody else.
 
 - **Send the bot a photo** → DSH reads it with vision tools. **Send a document** → DSH opens it.
 - **Ask for a file** → the model writes `[[send:/abs/path]]` and the bridge uploads it back to the chat.
@@ -67,13 +69,11 @@ Minimal profile config (`$DSH_HOME/profiles/wechat/cordis.patch.yml`):
   config:
     enabled: true
     sessionProfile: headless
-    workDir: /root/dsh-convos/wechat
-    allowFrom: "wxid_your_peer@im.wechat"   # empty or "*" accepts everyone
-    perPeerDirs: true
+    workDir: /root/dsh-convos/wechat        # one working directory, one session
+    allowFrom: "wxid_your_peer@im.wechat"   # your own id only; empty or "*" = anyone
     schedule:
       enabled: true
       time: "06:00"
-      peers: ["wxid_your_peer@im.wechat"]
       prompt: |
         [scheduled digest] Research yesterday's world + AI news, write a Word
         document, summarise it as a chat message, then output [[send:/abs/path]].
@@ -83,17 +83,18 @@ Full walkthrough — model API, QR login, reverse proxy with client certificates
 
 ## Design notes
 
+- **Single owner, single conversation.** The bridge keeps one working directory and one DSH session — the shape the WeChat bot gateway is actually built around. No per-contact machinery to misconfigure.
 - **No DSH forks or patches.** The phone layout rides the documented index-injection seam; the bridge is a plain DSH plugin.
 - **Clone, don't move.** When the plugin needs a button in a React-owned subtree (bottom tabs, composer actions), it clones the original node and forwards clicks — React reconciliation is never disturbed.
-- **One directory per contact.** DSH scopes sessions by working directory, so giving each WeChat peer a subdirectory isolates their sessions and files for free.
 - **Three layers of keep-alive.** systemd restart on crash → in-plugin loop rebuild on failure → external heartbeat watchdog for the wedged-but-alive case.
 
 ## Known limits
 
 - The bot is a **separate WeChat account**, not you: it only sees messages sent *to it*, and cannot read your personal chats.
-- Proactive pushes (the digest) need a `context_token` from an inbound message, so a contact must message the bot at least once first.
+- It is built for one owner. Keep `allowFrom` set to your own WeChat id so strangers who find the bot get ignored.
+- Proactive pushes (the digest) need a `context_token` from an inbound message, so you must message the bot once first.
 - The iLink bot gateway is not a public, versioned API; `channel_version` changes the upload response shape (the code handles both).
 
-## License
+## License and usage boundary
 
-MIT
+MIT for the code. Usage is limited to **personal self-hosted use** — see [docs/USAGE-BOUNDARY.md](docs/USAGE-BOUNDARY.md).

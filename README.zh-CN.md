@@ -2,7 +2,9 @@
 
 **把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）变成随身可用的东西** —— 一个能在微信里随时对话的机器人，加上一个把 DSH 网页界面重排成手机 App 的插件。
 
-[English](README.md) · [部署指南](docs/SETUP.md) · [踩坑记录](docs/PITFALLS.md)
+[English](README.md) · [部署指南](docs/SETUP.md) · [踩坑记录](docs/PITFALLS.md) · [**使用边界**](docs/USAGE-BOUNDARY.md)
+
+> ⚠️ **仅限个人自用**。这是一个"一个人 + 一个机器人 + 一段对话"的单人工具，**不授权**用于对外提供服务、群发营销、骚扰他人、窥探隐私、绕过平台规则或替他人托管账号——详见 [使用边界](docs/USAGE-BOUNDARY.md)。一切后果由使用者自负。
 
 <p align="center">
   <img src="docs/images/wechat-digest.jpg" width="45%" alt="微信机器人推送每日早报">
@@ -16,7 +18,7 @@
 
 ### 1. `dsh-wechat-connect` —— 微信桥接
 
-在服务器上长轮询微信 iLink 机器人网关。文字、图片、语音、文件双向收发；**每个联系人独立工作目录 + 独立 DSH 会话**，互不串台。
+在服务器上长轮询微信 iLink 机器人网关。文字、图片、语音、文件双向收发，**单一工作目录 + 单一 DSH 会话**——这个机器人只服务它自己的主人。
 
 - **发图片给机器人** → DSH 用视觉工具读；**发文档** → DSH 直接打开处理
 - **要文件** → 模型在回复里写 `[[send:/绝对路径]]`，桥接自动上传回聊天
@@ -68,8 +70,8 @@ npm i -g @deepseek-ai/dsh
     enabled: true
     sessionProfile: headless
     workDir: /root/dsh-convos/wechat
-    allowFrom: "wxid_your_peer@im.wechat"   # 空或 "*" 表示所有人
-    perPeerDirs: true
+    allowFrom: "wxid_your_peer@im.wechat"   # 只放行你自己
+    workDir: /root/dsh-convos/wechat        # 单一工作目录（不分子目录）
     schedule:
       enabled: true
       time: "06:00"
@@ -85,15 +87,16 @@ npm i -g @deepseek-ai/dsh
 
 - **不 fork、不打补丁**：手机端适配走官方注入口；微信桥接是标准 DSH 插件。
 - **克隆而不是搬动 DOM**：需要往 React 管的界面里加按钮时（底部导航、输入框右侧控件），克隆原节点并转发点击，绝不动 React 的树。
-- **一个联系人一个目录**：DSH 按工作目录隔离会话，给每个微信联系人建子目录，会话和文件天然隔离。
+- **单人单会话**：桥接只维护一个工作目录、一条 DSH 会话 —— 这正是微信机器人网关被设计出来的用法。没有多人联系人那套东西可以配错。
 - **三层保活**：systemd 崩溃重启 → 插件内循环重建 → 外部心跳看门狗（对付"进程活着但没在工作"）。
 
 ## 已知边界
 
 - 机器人是**独立的微信账号**，不是你本人：它只能看到**发给它**的消息，读不到你个人微信里的聊天。
-- 主动推送（早报）依赖微信网关的 `context_token`，需要对方先给机器人发过消息。
+- 它只为**一个主人**服务。请把 `allowFrom` 设成你自己的微信 id，这样别人即使找到这个机器人也会被忽略。
+- 主动推送（早报）依赖微信网关的 `context_token`，需要你先给机器人发过一条消息。
 - iLink 机器人网关不是公开版本化的 API，`channel_version` 不同会导致上传接口返回结构不同（代码已兼容两种）。
 
-## License
+## License 与使用边界
 
-MIT
+代码用 MIT 许可；使用范围**仅限个人自用**，详见 [使用边界](docs/USAGE-BOUNDARY.md)。

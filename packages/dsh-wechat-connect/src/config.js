@@ -20,12 +20,15 @@ function defaultConfig() {
     token: "",
     accountId: "",
     // Empty or "*" accepts every sender; otherwise a comma-separated allow list.
+    // Keep it set to your own WeChat id: this bridge is for talking to your own
+    // bot, and the allow list is what keeps strangers out.
     allowFrom: "",
-    // Standing instructions prepended to every peer task: who the bot is, how it
+    // Standing instructions prepended to every task: who the bot is, how it
     // should behave, and what it must not decide on the owner's behalf.
     instructions: "",
     routeTag: "",
-    // Where per-peer sessions run.
+    // The single working directory the conversation runs in. One owner, one
+    // conversation, one workspace — no per-contact subdirectories.
     workDir: "",
     // Which DSH profile answers WeChat messages.
     sessionProfile: "headless",
@@ -40,9 +43,6 @@ function defaultConfig() {
     // path to DSH instead of dropping the message.
     downloadMedia: true,
     incomingDir: "",
-    // One subdirectory per conversation under workDir, so peers never share a
-    // workspace (their files and sessions stay apart).
-    perPeerDirs: true,
     maxMediaBytes: 20 * 1024 * 1024,
     mediaTimeoutMs: 60000,
     // Outbound media: let the model hand files back to the chat.
@@ -53,14 +53,13 @@ function defaultConfig() {
     stateFile: "",
     logFile: "",
     logLevel: "info",
-    // Daily digest: run `prompt` at `time` (server local time) for each peer in
-    // `peers` and push the answer — text plus any [[send:...]] attachments.
-    // Peers must have messaged the bot once, because the gateway requires a
+    // Daily digest: run `prompt` at `time` (server local time) and push the
+    // answer — text plus any [[send:...]] attachments — to the owner. The owner
+    // must have messaged the bot once, because the gateway requires a
     // context_token for anything the bot sends first.
     schedule: {
       enabled: false,
       time: "06:00",
-      peers: [],
       prompt: "",
       runOnStart: false,
     },
@@ -71,13 +70,9 @@ function defaultConfig() {
 function normalizeSchedule(raw) {
   const value = raw && typeof raw === "object" ? raw : {};
   const time = String(value.time ?? "06:00").trim();
-  const peers = Array.isArray(value.peers)
-    ? value.peers
-    : String(value.peers ?? "").split(",");
   return {
     enabled: value.enabled === true,
     time: /^([01]?\d|2[0-3]):([0-5]\d)$/.test(time) ? time : "06:00",
-    peers: peers.map((peer) => String(peer ?? "").trim()).filter(Boolean),
     prompt: String(value.prompt ?? "").trim(),
     runOnStart: value.runOnStart === true,
   };
@@ -133,7 +128,6 @@ function normalizeConfig(raw, { home } = {}) {
     maxInboundAgeMs: clampInt(merged.maxInboundAgeMs, base.maxInboundAgeMs, 0, 24 * 3600 * 1000),
     downloadMedia: merged.downloadMedia !== false,
     incomingDir: resolve(merged.incomingDir, path.join(workDir, "incoming")),
-    perPeerDirs: merged.perPeerDirs !== false,
     maxMediaBytes: clampInt(merged.maxMediaBytes, base.maxMediaBytes, 1024, 512 * 1024 * 1024),
     mediaTimeoutMs: clampInt(merged.mediaTimeoutMs, base.mediaTimeoutMs, 1000, 600000),
     sendMedia: merged.sendMedia !== false,

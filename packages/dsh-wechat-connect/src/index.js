@@ -42,13 +42,14 @@ function formatStatus(status) {
     `  最近消息:  ${status.lastPeerId || "(无)"} @ ${
       status.lastMessageAtMs ? new Date(status.lastMessageAtMs).toISOString() : "从未"
     }`,
-    `  联系人:    ${status.peers.length ? status.peers.join(", ") : "(无)"}`,
+    `  联系人:    ${status.owner || "(对方还没给机器人发过消息)"}`,
+    `  DSH 会话:  ${status.sessionId || "(还没建立)"}`,
+    `  可主动推送: ${status.canPush ? "是" : "否（需要对方先发一条消息）"}`,
   ];
   if (status.schedule?.enabled) {
     lines.push(
       `  定时早报:  ${status.schedule.time} 每天` +
-        `${status.schedule.runOnStart ? " (启动时先跑一次)" : ""}` +
-        ` → ${status.schedule.peers.length ? status.schedule.peers.join(", ") : "全部已知联系人"}`
+        `${status.schedule.runOnStart ? " (启动时先跑一次)" : ""} → 推送给上面的联系人`
     );
   } else {
     lines.push("  定时早报:  未启用");
@@ -164,20 +165,19 @@ export function apply(ctx, rawConfig = {}) {
 
   ctx.tools.register(
     defineTool({
-      name: "wechat_connect_peers",
+      name: "wechat_connect_owner",
       description:
-        "List the WeChat contacts that have talked to this bot, with the DSH session each one " +
-        "is bound to and whether a reply token is available for them.",
+        "Show the one WeChat contact this bridge serves (its owner), the DSH session that " +
+        "contact's conversation continues, and whether the bot can push a message first.",
       parameters: {},
       ...asString,
       async execute() {
-        const peers = service.peers();
-        if (!peers.length) return "还没有任何微信联系人给机器人发过消息。";
+        const owner = service.owner();
+        if (!owner.peer) return "还没有联系人给机器人发过消息。";
         return [
-          `共 ${peers.length} 个联系人：`,
-          ...peers.map(
-            (p, i) => `${i + 1}. ${p.peer}\n   会话: ${p.sessionId}\n   可主动推送: ${p.lastContextToken ? "是" : "否"}`
-          ),
+          `联系人: ${owner.peer}`,
+          `DSH 会话: ${owner.sessionId || "(还没建立)"}`,
+          `可主动推送: ${owner.canPush ? "是" : "否（需要对方先发一条消息）"}`,
         ].join("\n");
       },
     })
@@ -187,17 +187,15 @@ export function apply(ctx, rawConfig = {}) {
     defineTool({
       name: "wechat_connect_send",
       description:
-        "Send a WeChat message from the bot to a contact that has messaged it before. The " +
-        "gateway requires the context token from an inbound message, so a contact cannot be " +
-        "pushed to until they have written first.",
+        "Send a WeChat message from the bot to its owner. The gateway requires the context " +
+        "token from an inbound message, so the owner must have written to the bot at least once.",
       parameters: {
-        peer: { type: "string", required: true, description: "WeChat user id (from wechat_connect_peers)." },
         text: { type: "string", required: true, description: "Message body to send." },
       },
       ...asString,
       async execute(args) {
-        const chunks = await service.sendTo(String(args.peer).trim(), String(args.text));
-        return `已向 ${args.peer} 发送 ${chunks} 条消息。`;
+        const chunks = await service.sendTo(String(args.text));
+        return `已发送 ${chunks} 条消息。`;
       },
     })
   );
@@ -207,14 +205,14 @@ export function apply(ctx, rawConfig = {}) {
       name: "wechat_connect_digest",
       description:
         "Run the configured scheduled digest (定时早报) right now instead of waiting for its " +
-        "time: one DSH turn with the schedule prompt per contact, then push the answer text " +
-        "and any [[send:...]] document to WeChat. Use it to test the daily briefing.",
+        "time: one DSH turn with the schedule prompt, then push the answer text and any " +
+        "[[send:...]] document to WeChat. Use it to test the daily briefing.",
       parameters: {},
       ...asString,
       async execute() {
         const result = await service.runDigestNow({ reason: "manual" });
-        if (!result.sent) return `未发送任何早报（原因：${result.reason}）。`;
-        return `已向 ${result.sent} 个联系人发送早报（原因：${result.reason}）。`;
+        if (!result.sent) return `未发送早报（原因：${result.reason}）。`;
+        return `早报已发送（原因：${result.reason}）。`;
       },
     })
   );

@@ -160,12 +160,14 @@ export class WechatConnectService {
       schedule: {
         enabled: Boolean(this.config.schedule?.enabled),
         time: this.config.schedule?.time ?? "",
-        peers: this.config.schedule?.peers ?? [],
         runOnStart: Boolean(this.config.schedule?.runOnStart),
       },
       workDir: this.config.workDir,
       allowFrom: this.config.allowFrom || "* (everyone)",
-      peers: Object.keys(this.state.data.threadIds),
+      // Single-owner bridge: the one WeChat contact this bot serves.
+      owner: this.state.owner,
+      sessionId: this.state.sessionId,
+      canPush: Boolean(this.state.contextToken),
       host: this.runner.probe(),
       credentialsFile: credentialsPath(this.config),
       stateFile: this.config.stateFile,
@@ -433,7 +435,7 @@ export class WechatConnectService {
    * open: `read_image` for pictures, the file tools for everything else.
    * @returns the task text, or null when nothing usable remains.
    */
-  async #composeTask(text, media, conversationDir) {
+  async #composeTask(text, media) {
     const lines = [];
     if (this.config.instructions) lines.push(this.config.instructions);
     if (text) lines.push(text);
@@ -456,7 +458,7 @@ export class WechatConnectService {
     for (const item of media) {
       try {
         const saved = await downloadMedia(item, {
-          dir: this.config.perPeerDirs ? path.join(conversationDir, "incoming") : this.config.incomingDir,
+          dir: this.config.incomingDir,
           maxBytes: this.config.maxMediaBytes,
           timeoutMs: this.config.mediaTimeoutMs,
           log: (message) => this.log?.info(message),
@@ -477,20 +479,13 @@ export class WechatConnectService {
   }
 
   /**
-   * One conversation, one folder: the peer's working directory under workDir.
-   * A DSH session's workspace *is* its working directory, so giving each peer
-   * its own folder keeps their files and resumable sessions apart.
+   * The single working directory this bridge runs in. DSH scopes a session by
+   * its working directory, so one directory here means one continuing
+   * conversation — which is all a self-hosted bot for one owner needs.
    */
-  #conversationDir(peer) {
-    if (!this.config.perPeerDirs) return this.config.workDir;
-    const safe =
-      String(peer)
-        .replace(/[^A-Za-z0-9._-]+/g, "_")
-        .replace(/^[._-]+/, "")
-        .slice(0, 80) || "peer";
-    const dir = path.join(this.config.workDir, safe);
-    fs.mkdirSync(dir, { recursive: true });
-    return dir;
+  #workDir() {
+    fs.mkdirSync(this.config.workDir, { recursive: true });
+    return this.config.workDir;
   }
 
   async #handleMessage(message) {
@@ -523,13 +518,14 @@ export class WechatConnectService {
       this.state.markProcessed(key);
       return;
     }
-    this.state.setContextToken(peer, contextToken);
+    this.state.contextToken = contextToken;
+    this.state.owner = peer;
 
-    const conversationDir = this.#conversationDir(peer);
+    const workDir = this.#workDir();
 
     // Images and files arrive as encrypted CDN links; fetch them first so the
     // turn sees local paths it can actually open.
-    const task = await this.#composeTask(text, media, conversationDir);
+    const task = await this.#composeTask(text, media);
     if (!task) {
       this.state.markProcessed(key);
       return;
@@ -539,7 +535,7 @@ export class WechatConnectService {
     this.log?.info(`message from ${peer}: ${task.slice(0, 160)}`);
 
     try {
-      const { text: replyText, attachments } = await this.#answer(peer, task, conversationDir);
+      const { text: replyText, attachments } = await this.#answer(task, workDir);
       if (replyText) {
         await this.#clientOrThrow().sendTextChunks({
           toUserId: peer,
@@ -564,7 +560,7 @@ export class WechatConnectService {
         }
       }
       this.state.markProcessed(key);
-      this.state.noteHandled(peer);
+      this.state.noteHandled();
       this.current.lastPeerId = peer;
       this.current.lastMessageAtMs = Date.now();
       this.current.processedMessages += 1;
@@ -614,9 +610,7 @@ export class WechatConnectService {
     if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
     const delay = Math.max(1000, next.getTime() - Date.now());
     this.log?.info(
-      `digest scheduled for ${next.toLocaleString()} (in ${Math.round(delay / 60000)} min) for ${
-        (schedule.peers.length ? schedule.peers : Object.keys(this.state.data.threadIds)).join(", ") || "(no peer yet)"
-      }`
+      `digest scheduled for ${next.toLocaleString()} (in ${Math.round(delay / 60000)} min) for ${this.state.owner || "(owner has not messaged yet)"}`
     );
     this.digestTimer = setTimeout(() => {
       this.digestTimer = null;
@@ -627,109 +621,99 @@ export class WechatConnectService {
   }
 
   /**
-   * Generate the configured digest with one DSH turn per peer and push it as a
-   * WeChat message, plus any file the model handed back via [[send:...]].
-   * @param {{reason?: string, peers?: string[]}} options
+   * Generate the configured digest with one DSH turn and push it to the owner as
+   * a WeChat message, plus any file the model handed back via [[send:...]].
+   * @param {{reason?: string}} options
    */
-  async runDigestNow({ reason = "manual", peers } = {}) {
+  async runDigestNow({ reason = "manual" } = {}) {
     const schedule = this.config.schedule;
     const prompt = schedule?.prompt;
     if (!prompt) {
       this.log?.warn("digest requested but schedule.prompt is empty");
       return { sent: 0, skipped: 0, reason: "no prompt" };
     }
-    // The gateway requires a context_token, so only peers that already messaged
-    // the bot can receive a message the bot starts.
-    const targets = (peers?.length ? peers : schedule.peers.length ? schedule.peers : Object.keys(this.state.data.threadIds))
-      .filter((peer) => {
-        if (this.state.contextTokenFor(peer)) return true;
-        this.log?.warn(`digest skipped for ${peer}: no context_token yet (that peer never messaged the bot)`);
-        return false;
-      });
-    if (!targets.length) {
-      this.#setStatus("error", "定时早报：没有可发送的联系人（需要对方先给机器人发过消息）。");
-      return { sent: 0, skipped: 0, reason: "no reachable peer" };
+    // The gateway requires a context_token, so the owner must have messaged the
+    // bot at least once before it can start a conversation.
+    const peer = this.state.owner;
+    const contextToken = this.state.contextToken;
+    if (!peer || !contextToken) {
+      this.#setStatus("error", "定时早报：还没有可推送的对象（先给机器人发一条消息）。");
+      return { sent: 0, skipped: 0, reason: "owner has not messaged yet" };
     }
 
-    let sent = 0;
-    for (const peer of targets) {
-      if (this.stopping) break;
-      const contextToken = this.state.contextTokenFor(peer);
-      const conversationDir = this.#conversationDir(peer);
-      const task = await this.#composeTask(prompt, [], conversationDir);
-      if (!task) continue;
-      this.#setStatus("running", `正在生成定时早报（${reason}）…`);
-      this.log?.info(`digest run for ${peer} (${reason})`);
-      try {
-        const { text: replyText, attachments } = await this.#answer(peer, task, conversationDir);
-        if (replyText) {
-          await this.#clientOrThrow().sendTextChunks({
-            toUserId: peer,
-            text: replyText,
-            contextToken,
-            maxChars: this.config.maxReplyChars,
-          });
-        }
-        let files = 0;
-        for (const filePath of attachments) {
-          try {
-            await this.#sendAttachment(peer, contextToken, filePath);
-            files++;
-          } catch (error) {
-            this.log?.error(`digest attachment failed (${filePath}): ${error.message}`);
-            await this.#clientOrThrow().sendTextChunks({
-              toUserId: peer,
-              text: `早报附件发送失败（${filePath}）：${error.message}`.slice(0, 500),
-              contextToken,
-              maxChars: this.config.maxReplyChars,
-            });
-          }
-        }
-        this.state.noteHandled(peer);
-        this.current.lastPeerId = peer;
-        this.current.lastMessageAtMs = Date.now();
-        this.#setStatus("running", `已发送定时早报给 ${peer}。`);
-        this.log?.info(
-          `digest sent to ${peer} (${replyText.length} chars, ${files} attachment(s))`
-        );
-        sent++;
-      } catch (error) {
-        this.current.lastError = error.message;
-        this.#setStatus("retrying", `定时早报失败：${error.message}`);
-        this.log?.error(`digest failed for ${peer}: ${error.stack || error.message}`);
+    const workDir = this.#workDir();
+    const task = await this.#composeTask(prompt, []);
+    if (!task) return { sent: 0, skipped: 0, reason: "empty task" };
+
+    this.#setStatus("running", `正在生成定时早报（${reason}）…`);
+    this.log?.info(`digest run for ${peer} (${reason})`);
+    try {
+      const { text: replyText, attachments } = await this.#answer(task, workDir);
+      if (replyText) {
+        await this.#clientOrThrow().sendTextChunks({
+          toUserId: peer,
+          text: replyText,
+          contextToken,
+          maxChars: this.config.maxReplyChars,
+        });
+      }
+      let files = 0;
+      for (const filePath of attachments) {
         try {
+          await this.#sendAttachment(peer, contextToken, filePath);
+          files++;
+        } catch (error) {
+          this.log?.error(`digest attachment failed (${filePath}): ${error.message}`);
           await this.#clientOrThrow().sendTextChunks({
             toUserId: peer,
-            text: `早报生成失败：${error.message}`.slice(0, 500),
+            text: `早报附件发送失败（${filePath}）：${error.message}`.slice(0, 500),
             contextToken,
             maxChars: this.config.maxReplyChars,
           });
-        } catch (sendError) {
-          this.log?.error(`could not report the digest failure: ${sendError.message}`);
         }
       }
+      this.state.noteHandled();
+      this.current.lastPeerId = peer;
+      this.current.lastMessageAtMs = Date.now();
+      this.#setStatus("running", "已发送定时早报。");
+      this.log?.info(`digest sent to ${peer} (${replyText.length} chars, ${files} attachment(s))`);
+      return { sent: 1, skipped: 0, reason };
+    } catch (error) {
+      this.current.lastError = error.message;
+      this.#setStatus("retrying", `定时早报失败：${error.message}`);
+      this.log?.error(`digest failed for ${peer}: ${error.stack || error.message}`);
+      try {
+        await this.#clientOrThrow().sendTextChunks({
+          toUserId: peer,
+          text: `早报生成失败：${error.message}`.slice(0, 500),
+          contextToken,
+          maxChars: this.config.maxReplyChars,
+        });
+      } catch (sendError) {
+        this.log?.error(`could not report the digest failure: ${sendError.message}`);
+      }
+      return { sent: 0, skipped: 1, reason: error.message };
+    } finally {
       this.state.save();
     }
-    return { sent, skipped: targets.length - sent, reason };
   }
 
-  /** Run one DSH turn for the peer, resuming its session when one is stored. */
-  async #answer(peer, text, conversationDir) {
-    const cwd = conversationDir || this.config.workDir;
-    const saved = this.state.threadIdFor(peer);
+  /** Run one DSH turn, resuming the stored session when there is one. */
+  async #answer(text, cwd) {
+    const saved = this.state.sessionId;
     let result;
     try {
-      result = await this.runner.runTurn(text, saved, { cwd });
+      result = await this.runner.runTurn(text, saved || undefined, { cwd });
     } catch (error) {
       // A persisted session can disappear (deleted, or a different DSH home),
       // and a session recorded under another workspace cannot be resumed here.
       if (!saved || !(error instanceof BridgeError)) throw error;
       this.log?.warn(`resuming session ${saved} failed (${error.message}); starting a new one`);
-      this.state.clearThreadId(peer);
+      this.state.clearSession();
       result = await this.runner.runTurn(text, undefined, { cwd });
     }
     if (result.sessionId && result.sessionId !== saved) {
-      this.state.setThreadId(peer, result.sessionId);
+      this.state.sessionId = result.sessionId;
     }
     let reply = String(result.text ?? "").trim();
     const extracted = this.config.sendMedia
@@ -767,12 +751,13 @@ export class WechatConnectService {
 
   // ---- outbound ------------------------------------------------------------
 
-  /** Push a message to a peer that has messaged the bot at least once. */
-  async sendTo(peer, text) {
-    const contextToken = this.state.contextTokenFor(peer);
-    if (!contextToken) {
+  /** Push a message to the owner, who must have messaged the bot at least once. */
+  async sendTo(text) {
+    const peer = this.state.owner;
+    const contextToken = this.state.contextToken;
+    if (!peer || !contextToken) {
       throw new GatewayError(
-        `${peer} 还没有给机器人发过消息，网关要求回复必须带 context_token，所以暂时无法主动推送。`
+        "还没有可推送的对象：网关要求回复必须带 context_token，所以要先给机器人发一条消息。"
       );
     }
     return this.#clientOrThrow().sendTextChunks({
@@ -783,13 +768,13 @@ export class WechatConnectService {
     });
   }
 
-  /** Known peers and the DSH session each one is bound to. */
-  peers() {
-    return Object.entries(this.state.data.threadIds).map(([peer, sessionId]) => ({
-      peer,
-      sessionId,
-      lastContextToken: Boolean(this.state.contextTokenFor(peer)),
-    }));
+  /** The one contact this bridge serves, and the session it continues. */
+  owner() {
+    return {
+      peer: this.state.owner,
+      sessionId: this.state.sessionId,
+      canPush: Boolean(this.state.contextToken),
+    };
   }
 }
 
