@@ -1,0 +1,15 @@
+# 移动端适配 (Mobile UI) bundle patch.
+#
+# 把 `dsh-mobile-ui` 加进某个 profile 的 `dsh.profile.bundles` 即自动生效，
+# 不需要在 profile 自己的 cordis.patch.yml 里再插一行（重复 id 会让加载器崩溃）。
+#
+# 想关掉就按 id 覆盖：
+#
+#   - id: mobile-ui
+#     config:
+#       enabled: false
+- insert:
+    - id: mobile-ui
+      name: dsh-mobile-ui
+      config:
+        enabled: true

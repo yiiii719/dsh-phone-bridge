@@ -1,0 +1,22 @@
+[Unit]
+Description=DeepSeek Harness Web UI (dsh)
+After=network-online.target
+Wants=network-online.target
+# Never give up restarting, however many times it crashes.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# The model API key(s) live here, mode 600, root only.
+Environment=DSH_HOME=/root/.dsh
+EnvironmentFile=-/etc/dsh.env
+WorkingDirectory=/root/dsh-convos
+# --trusted-host is required behind a reverse proxy; replace with your domain.
+ExecStart=/opt/node24/bin/node /opt/node24/lib/node_modules/@deepseek-ai/dsh/lib/bin.js \
+  web --no-open --port 18080 \
+  --trusted-host example.com
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

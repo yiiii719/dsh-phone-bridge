@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Sync DSH's GUI workspace registry with the sessions that actually exist.
+
+Sessions created outside the GUI (the WeChat bridge, `dsh headless`, cron) are
+recorded on disk under $DSH_HOME/sessions/<escaped-cwd>/<session-id>/ but never
+added to a workspace's sessionIds — so the GUI files them under "未分组". This
+attaches every session to the workspace whose path equals its recorded cwd.
+
+Usage: dsh-workspace-sync [--dry-run]
+"""
+import json
+import os
+import sys
+import glob
+import datetime
+
+HOME = os.environ.get("DSH_HOME", "/root/.dsh")
+STORE = os.path.join(HOME, "storages", "workspace.json")
+SESSIONS = os.path.join(HOME, "sessions")
+
+
+def now_iso():
+    """The workspace record schema wants an ISO-8601 string, not epoch millis."""
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def read_session_head(path):
+    """Return (sessionId, cwd, createdAt) from the first line of a session log."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["zstd", "-d", "-c", path],
+            capture_output=True, timeout=60, check=False,
+        ).stdout
+    except Exception:
+        return None
+    first = out.split(b"\n", 1)[0]
+    try:
+        head = json.loads(first.decode("utf-8", "replace"))
+    except Exception:
+        return None
+    if head.get("type") != "session":
+        return None
+    return head.get("id"), head.get("cwd"), head.get("createdAt", 0)
+
+
+def collect():
+    found = []
+    for log in glob.glob(os.path.join(SESSIONS, "*", "*", "session.v4.jsonl.zstd")):
+        info = read_session_head(log)
+        if not info or not info[0] or not info[1]:
+            continue
+        sid, cwd, created = info
+        found.append({"id": sid, "cwd": os.path.normpath(cwd), "createdAt": created})
+    return found
+
+
+def main():
+    dry = "--dry-run" in sys.argv
+    sessions = collect()
+    if not sessions:
+        print("没有扫描到会话")
+        return 1
+    with open(STORE, encoding="utf-8") as fh:
+        store = json.load(fh)
+    table = store.setdefault("tables", {}).setdefault("workspaces", {})
+
+    by_path = {}
+    for s in sessions:
+        by_path.setdefault(s["cwd"], []).append(s)
+
+    changed = False
+    for wid, ws in table.items():
+        # The record schema requires ISO strings; heal anything else so a bad
+        # value can never take the whole workspace domain down again.
+        for key in ("createdAt", "updatedAt"):
+            if not isinstance(ws.get(key), str):
+                print(f"{ws.get('title')}: 修正 {key} 字段类型 ({type(ws.get(key)).__name__} -> str)")
+                if not dry:
+                    ws[key] = now_iso()
+                changed = True
+        path = os.path.normpath(ws.get("path") or "")
+        if not path:
+            continue
+        candidates = sorted(by_path.get(path, []), key=lambda s: s["createdAt"], reverse=True)
+        ids = [s["id"] for s in candidates]
+        known = [i for i in (ws.get("sessionIds") or []) if isinstance(i, str)]
+        merged = list(dict.fromkeys(ids + known))
+        if merged != known:
+            print(f"{ws.get('title')} ({path}): {len(known)} -> {len(merged)} 个会话")
+            for sid in merged:
+                if sid not in known:
+                    print(f"    + {sid}")
+            if not dry:
+                ws["sessionIds"] = merged
+                ws["updatedAt"] = now_iso()
+            changed = True
+        else:
+            print(f"{ws.get('title')} ({path}): 已是最新（{len(known)} 个会话）")
+
+    unassigned = [s for s in sessions if not any(
+        os.path.normpath(w.get("path") or "") == s["cwd"] for w in table.values()
+    )]
+    if unassigned:
+        print(f"\n仍未归类（会显示在「未分组」）: {len(unassigned)} 个")
+        for path, items in sorted({s['cwd']: [x for x in unassigned if x['cwd'] == s['cwd']] for s in unassigned}.items()):
+            print(f"    {path}: {len(items)} 个")
+
+    if changed and not dry:
+        tmp = f"{STORE}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(store, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, STORE)
+        print("\n已写入 workspace.json")
+    elif dry:
+        print("\n(dry-run，未写入)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

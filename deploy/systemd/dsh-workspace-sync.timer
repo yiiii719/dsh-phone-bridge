@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically file new DSH sessions into their workspace
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+AccuracySec=30s
+Unit=dsh-workspace-sync.service
+
+[Install]
+WantedBy=timers.target

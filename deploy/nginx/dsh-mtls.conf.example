@@ -1,0 +1,60 @@
+# 反向代理 + 客户端证书（mTLS）示例
+#
+# 目标：这个域名只允许装了客户端证书的设备访问（手机、笔记本各一张证书）。
+# 换掉：example.com / 证书路径 / 上游端口。
+#
+# ⚠️ 如果域名解析走了 Cloudflare 代理（橙云），TLS 在 CF 就终止了，
+#    客户端证书根本到不了这里 —— 必须改成 DNS only（灰云）。
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    server_name example.com;
+
+    # Let's Encrypt / acme.sh 的 HTTP-01 校验
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name example.com;
+
+    ssl_certificate     /etc/nginx/ssl/example.com.crt;
+    ssl_certificate_key /etc/nginx/ssl/example.com.key;
+
+    # ---- 设备级访问控制：没有客户端证书一律 403 ----
+    ssl_client_certificate /srv/dsh-pki/ca.crt;   # 自建 CA 的证书（只放公钥）
+    ssl_verify_client optional;                    # 用 optional + if 才能给出清晰状态码
+    if ($ssl_client_verify != SUCCESS) {
+        return 403;
+    }
+
+    # ---- 首次登录用的短链：把进程令牌重定向成 cookie ----
+    # 令牌在 dsh web 启动日志里（每次重启都会变），维护时替换这一行。
+    location = /l/CHANGE_ME {
+        return 302 /?token=REPLACE_WITH_PROCESS_TOKEN;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:18080;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_buffering off;               # 流式输出要关掉缓冲
+    }
+}

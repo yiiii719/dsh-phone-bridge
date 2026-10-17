@@ -1,0 +1,17 @@
+[Unit]
+Description=DeepSeek Harness WeChat bridge (dsh)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Environment=DSH_HOME=/root/.dsh
+EnvironmentFile=-/etc/dsh.env
+WorkingDirectory=/root/dsh-convos/wechat
+ExecStart=/opt/node24/bin/node /opt/node24/lib/node_modules/@deepseek-ai/dsh/lib/bin.js --profile wechat
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

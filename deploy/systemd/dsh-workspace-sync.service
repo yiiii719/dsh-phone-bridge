@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync DSH GUI workspace registry with existing sessions (WeChat bridge / headless runs)
+Documentation=file:/usr/local/bin/dsh-workspace-sync
+
+[Service]
+Type=oneshot
+Environment=DSH_HOME=/root/.dsh
+ExecStart=/usr/bin/python3 /usr/local/bin/dsh-workspace-sync
+# Never fight the web host for the file: keep the run short and quiet.
+Nice=10

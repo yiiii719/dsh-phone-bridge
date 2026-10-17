@@ -1,0 +1,7 @@
+[Unit]
+Description=DSH healthcheck (restart web/bridge when up but not working)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dsh-healthcheck
+Nice=10

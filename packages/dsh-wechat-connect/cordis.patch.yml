@@ -1,0 +1,20 @@
+# 微信连接 (WeChat Connect) bundle patch.
+#
+# Adding `dsh-wechat-connect` to a profile's `dsh.profile.bundles` applies this
+# automatically — there is nothing to hand-write. Do NOT insert this row again
+# in the profile's own cordis.patch.yml: a duplicate id crashes the loader.
+#
+# The plugin works with no configuration at all. Override any key by targeting
+# this id from the profile patch layer:
+#
+#   - id: wechat-connect
+#     config:
+#       allowFrom: wxid_your_own_id
+#       workDir: ~/projects
+#       enabled: false
+- insert:
+    - id: wechat-connect
+      name: dsh-wechat-connect
+      config:
+        enabled: true
+        sessionProfile: headless

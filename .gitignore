@@ -1,0 +1,37 @@
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# DSH runtime state — never publish these
+state.json
+credentials.json
+heartbeat.json
+*.log
+sessions/
+storages/
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+!deploy/nginx/*.example
+
+# Generated documents / media
+*.docx
+*.xlsx
+*.pptx
+*.mp3
+*.mp4
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

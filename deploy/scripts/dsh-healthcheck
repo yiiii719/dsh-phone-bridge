@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# DSH healthcheck — restart a service that is "up but not working".
+#
+# systemd already restarts crashed units; this catches the silent failures:
+# the web host alive but not answering, and the WeChat bridge process alive
+# while its long-poll loop is stuck or dead (detected via its heartbeat file).
+set -u
+
+STALE_AFTER="${DSH_HEARTBEAT_STALE_SEC:-420}"   # 7 分钟没有轮询就算卡死
+STAMP="$(date '+%F %T')"
+
+# 1) web UI: any HTTP answer means the process is serving.
+code="$(curl -s -o /dev/null -m 8 -w '%{http_code}' http://127.0.0.1:18080/ 2>/dev/null || echo 000)"
+if [ "$code" = "000" ]; then
+  echo "[$STAMP] dsh-web 无响应 (curl 失败) → 重启"
+  systemctl restart dsh-web
+else
+  echo "[$STAMP] dsh-web 正常 (HTTP $code)"
+fi
+
+# 2) WeChat bridge: heartbeat freshness proves the poll loop is turning.
+HB="/root/.dsh/wechat-connect/heartbeat.json"
+if systemctl is-active --quiet dsh-wechat; then
+  if [ -f "$HB" ]; then
+    age=$(( $(date +%s) - $(stat -c %Y "$HB") ))
+    if [ "$age" -gt "$STALE_AFTER" ]; then
+      echo "[$STAMP] 微信桥接心跳 ${age}s 没更新 → 重启 dsh-wechat"
+      systemctl restart dsh-wechat
+    else
+      echo "[$STAMP] 微信桥接正常 (心跳 ${age}s 前)"
+    fi
+  else
+    echo "[$STAMP] 没有心跳文件 → 重启一次 dsh-wechat"
+    systemctl restart dsh-wechat
+  fi
+else
+  echo "[$STAMP] dsh-wechat 未在运行 → 启动"
+  systemctl start dsh-wechat
+fi
+
+# 3) Disk guard: a full disk would take everything down.
+avail_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+if [ "${avail_kb:-999999}" -lt 524288 ]; then
+  echo "[$STAMP] ⚠️ 根分区剩余不足 512MB（当前 $((avail_kb/1024))MB）"
+  journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+fi
+
+exit 0
